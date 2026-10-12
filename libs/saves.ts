@@ -16,6 +16,8 @@ export type Save = {
   createdAt?: string; // ISO timestamp
   fileUrl?: string; // signed URL (or local blob) for opening the original file
   mime?: string;
+  inbox?: boolean; // arrived by sharing and is waiting in the Inbox
+  description?: string; // page description for links
 };
 
 export type NewSave = Omit<Save, "id" | "ago" | "tags" | "remoteId" | "pending">;

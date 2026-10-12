@@ -20,6 +20,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
     if (!body || typeof body !== "object") {
       return Response.json({ error: "Invalid request" }, { status: 400 });
     }
+    
 
     const { data: row, error: findError } = await supabase
       .from("notes")
@@ -59,7 +60,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
     }
 
     if (body.tags !== undefined) update.tags = cleanTags(body.tags);
-
+    if (typeof body.inbox === "boolean") update.inbox = body.inbox;
     if (Object.keys(update).length === 0) {
       return Response.json({ error: "Nothing to update" }, { status: 400 });
     }

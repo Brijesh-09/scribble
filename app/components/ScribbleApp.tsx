@@ -18,8 +18,10 @@ import { SaveRow, type TileSize } from "@/app/components/SaveRow";
 import { ScribblePad } from "@/app/components/Scribblepad";
 import { TabBar } from "@/app/components/TabBar";
 import { Pager } from "@/app/components/Pager";
+import { InboxPage } from "@/app/components/InboxPage";
 import { DetailSheet, type Edits } from "@/app/components/DetailSheet";
 import { AccountSheet } from "@/app/components/AccountSheet";
+import { ShareSetupSheet } from "@/app/components/ShareSetupSheet";
 import { ALL, KIND_TAG, SYSTEM_TAGS, uid, type NewSave, type Save } from "@/libs/saves";
 import {
   ApiError,
@@ -35,29 +37,16 @@ import {
 type Toast = { key: string; message: string; ids?: string[]; error?: boolean };
 type User = { email: string; createdAt: string };
 
-const SOON = {
-  inbox: { title: "Inbox", body: "Things you share to Scribble from other apps will land here first." },
-  share: { title: "Share", body: "Send a collection to someone with a single link." },
-} as const;
-
 const SKELETON: TileSize[] = ["s", "s", "w", "s", "s"];
 const SPAN = { s: "", w: "col-span-2", t: "row-span-2", l: "col-span-2 row-span-2" } as const;
 
-function SoonPage({
-  which,
-  initial,
-  onAccount,
-}: {
-  which: keyof typeof SOON;
-  initial?: string;
-  onAccount: () => void;
-}) {
+function SharePage({ initial, onAccount }: { initial?: string; onAccount: () => void }) {
   return (
     <div className="mx-auto min-h-full w-full max-w-[430px] pb-44">
       <Header initial={initial} onAccount={onAccount} />
       <section className="mt-24 px-8 text-center">
-        <h2 className="font-script text-[36px] leading-none">{SOON[which].title}</h2>
-        <p className="mt-3 text-[15px] leading-6 text-[var(--muted)]">{SOON[which].body}</p>
+        <h2 className="font-script text-[48px] leading-none">Share</h2>
+        <p className="mt-3 text-[15px] leading-6 text-[var(--muted)]">Send a collection to someone with a single link.</p>
       </section>
     </div>
   );
@@ -71,6 +60,7 @@ export default function ScribbleApp({ user }: { user: User }) {
   const [composing, setComposing] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
   const [padKey, setPadKey] = useState(0); // bump to give the scribble pad a clean sheet
 
@@ -107,6 +97,20 @@ export default function ScribbleApp({ user }: { user: User }) {
     [pos, reduce, stop]
   );
 
+  /* ---------- coming back from a share: jump to the Inbox ---------- */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("shared") && !params.has("share_error")) return;
+    const err = params.get("share_error");
+    window.history.replaceState(null, "", window.location.pathname);
+    if (err) {
+      showToast({ message: err, error: true });
+    } else {
+      goTo(2);
+      showToast({ message: "Saved to your Inbox" });
+    }
+  }, [goTo, showToast]);
+
   /* ---------- load from the API ---------- */
   const load = useCallback(async () => {
     try {
@@ -142,22 +146,25 @@ export default function ScribbleApp({ user }: { user: User }) {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [load]);
 
-  /* ---------- derived: tags, filter, bento sizes, stats ---------- */
+  /* ---------- derived: library vs inbox, tags, filter, bento sizes, stats ---------- */
+  const library = useMemo(() => saves.filter((s) => !s.inbox), [saves]);
+  const inboxItems = useMemo(() => saves.filter((s) => s.inbox), [saves]);
+
   const tags = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const s of saves) for (const t of s.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+    for (const s of library) for (const t of s.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
     const system = SYSTEM_TAGS.filter((t) => counts.has(t));
     const custom = [...counts.keys()]
       .filter((t) => !SYSTEM_TAGS.includes(t))
       .sort((a, b) => counts.get(b)! - counts.get(a)! || a.localeCompare(b));
     return { all: [ALL, ...system, ...custom], custom };
-  }, [saves]);
+  }, [library]);
 
   const activeFilter = tags.all.includes(filter) ? filter : ALL;
 
   const visible = useMemo(
-    () => (activeFilter === ALL ? saves : saves.filter((s) => s.tags.includes(activeFilter))),
-    [saves, activeFilter]
+    () => (activeFilter === ALL ? library : library.filter((s) => s.tags.includes(activeFilter))),
+    [library, activeFilter]
   );
 
   // first image is the hero, later images alternate tall/wide, long notes go wide
@@ -272,7 +279,7 @@ export default function ScribbleApp({ user }: { user: User }) {
     }
   }
 
-  /* ---------- editing and deleting a save ---------- */
+  /* ---------- editing, keeping and deleting a save ---------- */
   async function editSave(id: string, edits: Edits) {
     const before = saves.find((s) => s.id === id);
     if (!before?.remoteId) return;
@@ -308,7 +315,21 @@ export default function ScribbleApp({ user }: { user: User }) {
     }
   }
 
-  async function deleteSave(id: string) {
+  async function keepSave(id: string) {
+    const before = saves.find((s) => s.id === id);
+    if (!before?.remoteId) return;
+
+    setSaves((prev) => prev.map((s) => (s.id === id ? { ...s, inbox: false } : s)));
+    try {
+      await updateNote(before.remoteId, { inbox: false });
+      showToast({ message: "Kept in your library" });
+    } catch (err) {
+      setSaves((prev) => prev.map((s) => (s.id === id ? before : s)));
+      showToast({ message: errorMessage(err), error: true });
+    }
+  }
+
+  async function deleteSave(id: string, label = "Deleted") {
     const index = saves.findIndex((s) => s.id === id);
     const target = saves[index];
     if (!target?.remoteId) return;
@@ -317,7 +338,7 @@ export default function ScribbleApp({ user }: { user: User }) {
     setSaves((prev) => prev.filter((s) => s.id !== id));
     try {
       await deleteNote(target.remoteId);
-      showToast({ message: "Deleted" });
+      showToast({ message: label });
     } catch (err) {
       setSaves((prev) => {
         const copy = [...prev];
@@ -342,7 +363,7 @@ export default function ScribbleApp({ user }: { user: User }) {
       />
 
       <section className="mt-9 px-5">
-        <h2 className="font-script text-[34px] leading-none">Your Lib</h2>
+        <h2 className="font-script text-[46px] leading-none">Your Lib</h2>
         <div className="mt-3">
           <TagFilter tags={tags.all} value={activeFilter} onChange={setFilter} />
         </div>
@@ -414,8 +435,22 @@ export default function ScribbleApp({ user }: { user: User }) {
               />
             ),
           },
-          { scroll: true, node: <SoonPage which="inbox" initial={initial} onAccount={openAccount} /> },
-          { scroll: true, node: <SoonPage which="share" initial={initial} onAccount={openAccount} /> },
+          {
+            scroll: true,
+            node: (
+              <InboxPage
+                items={inboxItems}
+                loading={loading}
+                initial={initial}
+                onAccount={openAccount}
+                onOpen={setOpenId}
+                onKeep={keepSave}
+                onDiscard={(id) => deleteSave(id, "Discarded")}
+                onHelp={() => setSetupOpen(true)}
+              />
+            ),
+          },
+          { scroll: true, node: <SharePage initial={initial} onAccount={openAccount} /> },
         ]}
       />
 
@@ -445,6 +480,10 @@ export default function ScribbleApp({ user }: { user: User }) {
       </AnimatePresence>
 
       <AnimatePresence>
+        {setupOpen && <ShareSetupSheet key="setup" onClose={() => setSetupOpen(false)} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {toast && (
           <motion.div
             key={toast.key}
@@ -470,7 +509,7 @@ export default function ScribbleApp({ user }: { user: User }) {
         )}
       </AnimatePresence>
 
-      <TabBar pos={pos} active={active} onSelect={goTo} />
+      <TabBar pos={pos} active={active} onSelect={goTo} inboxCount={inboxItems.length} />
     </MotionConfig>
   );
 }

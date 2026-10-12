@@ -36,6 +36,8 @@ export type NoteRow = {
   created_at: string;
   file_url?: string | null;
   image_url?: string | null;
+  inbox?: boolean | null;
+  meta?: { image?: string; description?: string; site?: string } | null;
 };
 
 export function timeAgo(iso: string) {
@@ -58,9 +60,15 @@ export function rowToSave(row: NoteRow): Save {
   const stored = row.tags ?? [];
   let item: NewSave;
 
-  if (row.content_type === "url") {
+    if (row.content_type === "url") {
     const parsed = fromText(row.content);
-    item = { ...parsed, title: row.title && row.title !== row.content ? row.title : parsed.title };
+    const info = row.meta ?? {};
+    item = {
+      ...parsed,
+      title: row.title && row.title !== row.content ? row.title : parsed.title,
+      preview: info.image,
+      description: info.description,
+    };
   } else if (row.content_type === "text") {
     item = { kind: "note", title: row.title || row.content.slice(0, 80), meta: "Note", content: row.content };
   } else {

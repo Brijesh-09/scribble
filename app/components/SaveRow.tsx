@@ -55,11 +55,15 @@ export function SaveRow({ save, size , onOpen }: { save: Save; size: TileSize ; 
         {save.preview ? (
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+                        <img
               src={save.preview}
               alt=""
               loading="lazy"
               decoding="async"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
               className="absolute inset-0 size-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />

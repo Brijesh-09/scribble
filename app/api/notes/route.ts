@@ -1,9 +1,9 @@
 import { createClient } from "@/utils/supabase/server";
 
-const COLUMNS =
-  "id, title, content, content_type, storage_path, original_filename, mime_type, tags, created_at";
+export const COLUMNS =
+  "id, title, content, content_type, storage_path, original_filename, mime_type, tags, inbox, meta, created_at";
 
-function cleanTags(input: unknown): string[] {
+export function cleanTags(input: unknown): string[] {
   const list = Array.isArray(input) ? input : [];
   const out: string[] = [];
   for (const t of list) {

@@ -11,12 +11,13 @@ const TABS = [
 ] as const;
 
 type Props = {
-  pos: MotionValue<number>; // fractional page index, shared with the pager
+  pos: MotionValue<number>;
   active: number;
   onSelect: (index: number) => void;
+  inboxCount?: number;
 };
 
-export function TabBar({ pos, active, onSelect }: Props) {
+export function TabBar({ pos, active, onSelect, inboxCount = 0 }: Props) {
   // 1 when the full-screen scribble pad is fully in view, 0 two pages away
   const away = useTransform(pos, (p) => Math.max(0, 1 - Math.abs(p - 1)));
   const y = useTransform(away, (a) => a * 150);
@@ -51,8 +52,14 @@ export function TabBar({ pos, active, onSelect }: Props) {
                   on ? "text-[var(--text)]" : "text-[var(--muted)]"
                 }`}
               >
-                <Icon size={22} strokeWidth={on ? 2 : 1.6} />
-                <span>{label}</span>
+                                <span className="relative">
+                  <Icon size={22} strokeWidth={on ? 2 : 1.6} />
+                  {i === 2 && inboxCount > 0 && (
+                    <span className="absolute -right-2.5 -top-1.5 grid min-w-4 place-items-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-bold leading-4 text-[var(--bg)]">
+                      {inboxCount > 9 ? "9+" : inboxCount}
+                    </span>
+                  )}
+                </span>
               </motion.button>
             );
           })}
