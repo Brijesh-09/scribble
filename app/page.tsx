@@ -1,10 +1,10 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import ScribbleApp from "@/app/components/ScribbleApp";
 
-export const dynamic = "force-dynamic";
-
-export default async function Page() {
+// reads the user's session cookie, so it must render per request inside <Suspense>
+async function AuthedApp() {
   const supabase = await createClient();
   const {
     data: { user },
@@ -12,5 +12,13 @@ export default async function Page() {
 
   if (!user) redirect("/login");
 
-    return <ScribbleApp user={{ email: user.email ?? "", createdAt: user.created_at }} />;
+  return <ScribbleApp user={{ email: user.email ?? "", createdAt: user.created_at }} />;
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<div className="min-h-dvh bg-[var(--bg)]" />}>
+      <AuthedApp />
+    </Suspense>
+  );
 }
