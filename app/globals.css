@@ -1,26 +1,71 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #0f0f10;
+  --surface: #18181a;
+  --text: #f4eeeb;
+  --muted: #9c918e;
+  --accent: #d9b8ae; /* the warm taupe from your sketch */
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Shantell Sans Variable", "Segoe Print", "Comic Sans MS", system-ui, sans-serif;
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+
+body {
+  overscroll-behavior-y: none;
+  padding-top: env(safe-area-inset-top);
+}
+
+/* Translucent material: light for small chrome, thick for big surfaces */
+.glass {
+  background: rgba(32, 32, 35, 0.6);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top-color: rgba(255, 255, 255, 0.16); /* light catching the top edge */
+}
+.glass-thick {
+  background: rgba(30, 30, 33, 0.82);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-top-color: rgba(255, 255, 255, 0.18);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .glass-thick {
+    background: #1c1c1e;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@media (prefers-contrast: more) {
+  .glass,
+  .glass-thick {
+    background: #1c1c1e;
+    border-color: rgba(255, 255, 255, 0.45);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.font-script {
+  font-family: "Reenie Beanie", "Segoe Script", cursive;
+  font-weight: 400;
+  font-synthesis: none; /* it only has one weight, so never fake bold */
+  letter-spacing: 0.01em;
 }
