@@ -111,7 +111,7 @@ export function storedTags(tags: string[]) {
 
 export async function updateNote(
   remoteId: string,
-  patch: { title?: string; content?: string; tags?: string[] }
+  patch: { title?: string; content?: string; tags?: string[]; inbox?: boolean }
 ) {
   await parse(
     await fetch(`/api/notes/${encodeURIComponent(remoteId)}`, {
