@@ -1,6 +1,6 @@
 export const COLUMNS =
-  "id, title, content, content_type, storage_path, original_filename, mime_type, tags, created_at";
-
+  "id, title, content, content_type, storage_path, original_filename, mime_type, tags, inbox, meta, created_at";
+  
 export function cleanTags(input: unknown): string[] {
   const list = Array.isArray(input) ? input : [];
   const out: string[] = [];
