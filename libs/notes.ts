@@ -1,4 +1,4 @@
-import { fromText, KIND_TAG, SYSTEM_TAGS, type NewSave, type Save } from "@/libs/saves";
+import { autoTags, fromText, KIND_TAG, SYSTEM_TAGS, type NewSave, type Save } from "@/libs/saves";
 
 /* ---------- errors ---------- */
 
@@ -33,11 +33,12 @@ export type NoteRow = {
   original_filename: string | null;
   mime_type: string | null;
   tags?: string[] | null;
+  inbox?: boolean | null;
+  pinned?: boolean | null;
+  meta?: { image?: string; description?: string; site?: string } | null;
   created_at: string;
   file_url?: string | null;
   image_url?: string | null;
-  inbox?: boolean | null;
-  meta?: { image?: string; description?: string; site?: string } | null;
 };
 
 export function timeAgo(iso: string) {
@@ -60,7 +61,7 @@ export function rowToSave(row: NoteRow): Save {
   const stored = row.tags ?? [];
   let item: NewSave;
 
-    if (row.content_type === "url") {
+  if (row.content_type === "url") {
     const parsed = fromText(row.content);
     const info = row.meta ?? {};
     item = {
@@ -75,7 +76,13 @@ export function rowToSave(row: NoteRow): Save {
     const name = row.original_filename ?? row.title;
     const isScribble = row.content_type === "image" && stored.includes(KIND_TAG.scribble);
     item = isScribble
-      ? { kind: "scribble", title: "Scribble", meta: "Drawing", note: row.content || undefined, preview: row.image_url ?? undefined }
+      ? {
+          kind: "scribble",
+          title: "Scribble",
+          meta: "Drawing",
+          note: row.content || undefined,
+          preview: row.image_url ?? undefined,
+        }
       : {
           kind: "file",
           title: name,
@@ -89,11 +96,13 @@ export function rowToSave(row: NoteRow): Save {
     ...item,
     id,
     remoteId: id,
-     createdAt: row.created_at,
+    ago: timeAgo(row.created_at),
+    createdAt: row.created_at,
     fileUrl: row.file_url ?? undefined,
     mime: row.mime_type ?? undefined,
-    ago: timeAgo(row.created_at),
-    tags: Array.from(new Set([KIND_TAG[item.kind], ...stored])),
+    inbox: !!row.inbox,
+    pinned: !!row.pinned,
+    tags: Array.from(new Set([...autoTags({ kind: item.kind, meta: item.meta, pinned: !!row.pinned }), ...stored])),
   };
 }
 
@@ -104,27 +113,14 @@ export async function fetchNotes(): Promise<Save[]> {
   return (json.items as NoteRow[]).map(rowToSave);
 }
 
-// kind tags (Links, Files...) are derived on load; only your tags and "Scribbles" are stored
+// automatic tags (Links, Instagram, Pinned...) are derived on load;
+// only your own tags and "Scribbles" are stored
 export function storedTags(tags: string[]) {
   return tags.filter((t) => t === KIND_TAG.scribble || !SYSTEM_TAGS.includes(t));
 }
 
-export async function updateNote(
-  remoteId: string,
-  patch: { title?: string; content?: string; tags?: string[]; inbox?: boolean }
-) {
-  await parse(
-    await fetch(`/api/notes/${encodeURIComponent(remoteId)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
-    })
-  );
-}
-
 export async function createNote(item: NewSave, tags: string[]): Promise<string> {
-  // kind tags (Links, Files...) are derived on load; only your tags and "Scribbles" are stored
-  const stored = storedTags(tags); tags.filter((t) => t === KIND_TAG.scribble || !SYSTEM_TAGS.includes(t));
+  const stored = storedTags(tags);
 
   let res: Response;
   if (item.file) {
@@ -150,6 +146,24 @@ export async function createNote(item: NewSave, tags: string[]): Promise<string>
 
 export async function deleteNote(remoteId: string) {
   await parse(await fetch(`/api/notes/${encodeURIComponent(remoteId)}`, { method: "DELETE" }));
+}
+
+export type NotePatch = {
+  title?: string;
+  content?: string;
+  tags?: string[];
+  inbox?: boolean;
+  pinned?: boolean;
+};
+
+export async function updateNote(remoteId: string, patch: NotePatch) {
+  await parse(
+    await fetch(`/api/notes/${encodeURIComponent(remoteId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    })
+  );
 }
 
 /* ---------- file prep: match the API's rules, shrink big photos ---------- */

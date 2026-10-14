@@ -61,6 +61,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
 
     if (body.tags !== undefined) update.tags = cleanTags(body.tags);
     if (typeof body.inbox === "boolean") update.inbox = body.inbox;
+    if (typeof body.pinned === "boolean") update.pinned = body.pinned;
     if (Object.keys(update).length === 0) {
       return Response.json({ error: "Nothing to update" }, { status: 400 });
     }

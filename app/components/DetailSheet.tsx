@@ -2,7 +2,19 @@
 
 import { useMemo, useState } from "react";
 import { motion } from "motion/react";
-import { AtSign, ExternalLink, FileText, Link2, PenLine, Pencil, StickyNote, Trash2 } from "lucide-react";
+import {
+  AtSign,
+  Check,
+  ExternalLink,
+  FileText,
+  Link2,
+  PenLine,
+  Pencil,
+  Pin,
+  PinOff,
+  StickyNote,
+  Trash2,
+} from "lucide-react";
 import { Sheet } from "./Sheet";
 import { cleanTag, SYSTEM_TAGS, type Save, type SaveKind } from "@/libs/saves";
 
@@ -30,6 +42,8 @@ type Props = {
   onClose: () => void;
   onEdit: (id: string, edits: Edits) => void;
   onDelete: (id: string) => void;
+  onPin: (id: string) => void;
+  onKeep: (id: string) => void;
 };
 
 function formatDate(iso?: string) {
@@ -38,7 +52,7 @@ function formatDate(iso?: string) {
   return Number.isNaN(d.getTime()) ? null : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-export function DetailSheet({ save, tagSuggestions, onClose, onEdit, onDelete }: Props) {
+export function DetailSheet({ save, tagSuggestions, onClose, onEdit, onDelete, onPin, onKeep }: Props) {
   const [mode, setMode] = useState<"view" | "edit" | "confirm">("view");
   const [text, setText] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -48,7 +62,7 @@ export function DetailSheet({ save, tagSuggestions, onClose, onEdit, onDelete }:
   const isLink = save.kind === "link" || save.kind === "social";
   const Icon = ICONS[save.kind];
   const customTags = save.tags.filter((t) => !SYSTEM_TAGS.includes(t));
-  const kindTag = save.tags.find((t) => SYSTEM_TAGS.includes(t));
+  const autoTagList = save.tags.filter((t) => SYSTEM_TAGS.includes(t));
   const created = formatDate(save.createdAt);
   const href = isLink && save.content && /^https?:\/\//i.test(save.content) ? save.content : undefined;
   const fileHref = useMemo(
@@ -90,10 +104,15 @@ export function DetailSheet({ save, tagSuggestions, onClose, onEdit, onDelete }:
   return (
     <Sheet title={KIND_LABEL[save.kind]} onClose={onClose}>
       <div className="space-y-5 pt-1">
-        {/* image first, for photos and scribbles */}
+        {/* image first, for photos, scribbles and link previews */}
         {save.preview && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={save.preview} alt="" className="max-h-[48dvh] w-full rounded-3xl bg-black/30 object-contain" />
+          <img
+            src={save.preview}
+            alt=""
+            referrerPolicy="no-referrer"
+            className="max-h-[48dvh] w-full rounded-3xl bg-black/30 object-contain"
+          />
         )}
 
         {mode === "edit" ? (
@@ -135,6 +154,9 @@ export function DetailSheet({ save, tagSuggestions, onClose, onEdit, onDelete }:
               </a>
             ) : (
               <p className="mt-2 break-all text-[15px] text-[var(--muted)]">{save.content}</p>
+            )}
+            {save.description && (
+              <p className="mt-3 text-[15px] leading-6 text-[var(--muted)]">{save.description}</p>
             )}
           </div>
         ) : (
@@ -213,11 +235,11 @@ export function DetailSheet({ save, tagSuggestions, onClose, onEdit, onDelete }:
             </div>
           ) : (
             <div className="flex flex-wrap gap-2">
-              {kindTag && (
-                <span className="rounded-full border border-white/10 px-3 py-1.5 text-[13px] text-[var(--muted)]">
-                  {kindTag}
+              {autoTagList.map((t) => (
+                <span key={t} className="rounded-full border border-white/10 px-3 py-1.5 text-[13px] text-[var(--muted)]">
+                  {t}
                 </span>
-              )}
+              ))}
               {customTags.map((t) => (
                 <span key={t} className="rounded-full bg-white/[0.08] px-3 py-1.5 text-[13px]">
                   #{t}
@@ -239,13 +261,30 @@ export function DetailSheet({ save, tagSuggestions, onClose, onEdit, onDelete }:
         {busy ? (
           <p className="py-2 text-center text-[15px] text-[var(--muted)]">Saving…</p>
         ) : mode === "view" ? (
-          <div className="flex gap-3">
-            <Action onClick={startEdit}>
-              <Pencil size={17} strokeWidth={1.9} /> Edit
-            </Action>
-            <Action tone="danger" onClick={() => setMode("confirm")}>
-              <Trash2 size={17} strokeWidth={1.9} /> Delete
-            </Action>
+          <div className="space-y-3">
+            {save.inbox && (
+              <Action
+                tone="primary"
+                onClick={() => {
+                  onKeep(save.id);
+                  onClose();
+                }}
+              >
+                <Check size={17} strokeWidth={2.25} /> Keep in library
+              </Action>
+            )}
+            <div className="flex gap-3">
+              <Action onClick={() => onPin(save.id)}>
+                {save.pinned ? <PinOff size={17} strokeWidth={1.9} /> : <Pin size={17} strokeWidth={1.9} />}
+                {save.pinned ? "Unpin" : "Pin"}
+              </Action>
+              <Action onClick={startEdit}>
+                <Pencil size={17} strokeWidth={1.9} /> Edit
+              </Action>
+              <Action tone="danger" onClick={() => setMode("confirm")}>
+                <Trash2 size={17} strokeWidth={1.9} /> Delete
+              </Action>
+            </div>
           </div>
         ) : mode === "edit" ? (
           <div className="flex gap-3">

@@ -13,8 +13,7 @@ import {
 import { CircleAlert } from "lucide-react";
 import { Header } from "@/app/components/Header";
 import { Composer, SPRING } from "@/app/components/Composer";
-import { TagFilter } from "@/app/components/TagFilter";
-import { SaveRow, type TileSize } from "@/app/components/SaveRow";
+import { Feed } from "@/app/components/Feed";
 import { ScribblePad } from "@/app/components/Scribblepad";
 import { TabBar } from "@/app/components/TabBar";
 import { Pager } from "@/app/components/Pager";
@@ -22,7 +21,7 @@ import { InboxPage } from "@/app/components/InboxPage";
 import { DetailSheet, type Edits } from "@/app/components/DetailSheet";
 import { AccountSheet } from "@/app/components/AccountSheet";
 import { ShareSetupSheet } from "@/app/components/ShareSetupSheet";
-import { ALL, KIND_TAG, SYSTEM_TAGS, uid, type NewSave, type Save } from "@/libs/saves";
+import { autoTags, deriveTags, PINNED_TAG, uid, type NewSave, type Save } from "@/libs/saves";
 import {
   ApiError,
   createNote,
@@ -37,8 +36,11 @@ import {
 type Toast = { key: string; message: string; ids?: string[]; error?: boolean };
 type User = { email: string; createdAt: string };
 
-const SKELETON: TileSize[] = ["s", "s", "w", "s", "s"];
-const SPAN = { s: "", w: "col-span-2", t: "row-span-2", l: "col-span-2 row-span-2" } as const;
+const withPin = (s: Save, pinned: boolean): Save => ({
+  ...s,
+  pinned,
+  tags: pinned ? Array.from(new Set([...s.tags, PINNED_TAG])) : s.tags.filter((t) => t !== PINNED_TAG),
+});
 
 function SharePage({ initial, onAccount }: { initial?: string; onAccount: () => void }) {
   return (
@@ -56,7 +58,7 @@ export default function ScribbleApp({ user }: { user: User }) {
   const [saves, setSaves] = useState<Save[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [filter, setFilter] = useState(ALL);
+  const [feedReset, setFeedReset] = useState(0); // bump to clear search and filters in the feeds
   const [composing, setComposing] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -133,6 +135,11 @@ export default function ScribbleApp({ user }: { user: User }) {
     load();
   }, [load]);
 
+  const retry = useCallback(() => {
+    setLoading(true);
+    load();
+  }, [load]);
+
   // signed image URLs last an hour, so refresh after a long absence
   useEffect(() => {
     let last = Date.now();
@@ -146,41 +153,10 @@ export default function ScribbleApp({ user }: { user: User }) {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [load]);
 
-  /* ---------- derived: library vs inbox, tags, filter, bento sizes, stats ---------- */
+  /* ---------- derived: library vs inbox, tag suggestions, stats ---------- */
   const library = useMemo(() => saves.filter((s) => !s.inbox), [saves]);
   const inboxItems = useMemo(() => saves.filter((s) => s.inbox), [saves]);
-
-  const tags = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const s of library) for (const t of s.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
-    const system = SYSTEM_TAGS.filter((t) => counts.has(t));
-    const custom = [...counts.keys()]
-      .filter((t) => !SYSTEM_TAGS.includes(t))
-      .sort((a, b) => counts.get(b)! - counts.get(a)! || a.localeCompare(b));
-    return { all: [ALL, ...system, ...custom], custom };
-  }, [library]);
-
-  const activeFilter = tags.all.includes(filter) ? filter : ALL;
-
-  const visible = useMemo(
-    () => (activeFilter === ALL ? library : library.filter((s) => s.tags.includes(activeFilter))),
-    [library, activeFilter]
-  );
-
-  // first image is the hero, later images alternate tall/wide, long notes go wide
-  const tiles = useMemo(() => {
-    let images = 0;
-    return visible.map((save) => {
-      let size: TileSize = "s";
-      if (save.preview) {
-        size = images === 0 ? "l" : images % 2 === 1 ? "t" : "w";
-        images++;
-      } else if (save.kind === "note" && save.title.length > 30) {
-        size = "w";
-      }
-      return { save, size };
-    });
-  }, [visible]);
+  const customTags = useMemo(() => deriveTags(library).custom, [library]);
 
   const stats = useMemo(
     () => ({
@@ -247,15 +223,15 @@ export default function ScribbleApp({ user }: { user: User }) {
       ago: "Just now",
       createdAt: new Date().toISOString(),
       pending: true,
-      tags: Array.from(new Set([KIND_TAG[i.kind], ...extra])),
+      tags: Array.from(new Set([...autoTags({ kind: i.kind, meta: i.meta }), ...extra])),
     }));
 
     setSaves((prev) => [...created, ...prev]);
-    if (activeFilter !== ALL && !created.every((c) => c.tags.includes(activeFilter))) setFilter(ALL);
+    setFeedReset((n) => n + 1); // clear search and filters so the new save is visible
     showToast({
       ids: created.map((c) => c.id),
       message:
-        created.length > 1 ? `Saved ${created.length} items` : `Saved to ${extra[0] ?? KIND_TAG[created[0].kind]}`,
+        created.length > 1 ? `Saved ${created.length} items` : `Saved to ${extra[0] ?? created[0].tags[0]}`,
     });
     navigator.vibrate?.(10);
 
@@ -279,7 +255,7 @@ export default function ScribbleApp({ user }: { user: User }) {
     }
   }
 
-  /* ---------- editing, keeping and deleting a save ---------- */
+  /* ---------- editing, pinning, keeping and deleting ---------- */
   async function editSave(id: string, edits: Edits) {
     const before = saves.find((s) => s.id === id);
     if (!before?.remoteId) return;
@@ -301,7 +277,7 @@ export default function ScribbleApp({ user }: { user: User }) {
       patch.content = edits.note;
     }
     if (edits.tags) {
-      next.tags = Array.from(new Set([KIND_TAG[before.kind], ...edits.tags]));
+      next.tags = Array.from(new Set([...autoTags(before), ...edits.tags]));
       patch.tags = storedTags(next.tags);
     }
     if (Object.keys(patch).length === 0) return;
@@ -311,6 +287,20 @@ export default function ScribbleApp({ user }: { user: User }) {
       await updateNote(before.remoteId, patch);
     } catch (err) {
       setSaves((prev) => prev.map((s) => (s.id === id ? before : s))); // put it back
+      showToast({ message: errorMessage(err), error: true });
+    }
+  }
+
+  async function togglePin(id: string) {
+    const before = saves.find((s) => s.id === id);
+    if (!before?.remoteId) return;
+    const pinned = !before.pinned;
+
+    setSaves((prev) => prev.map((s) => (s.id === id ? withPin(s, pinned) : s)));
+    try {
+      await updateNote(before.remoteId, { pinned });
+    } catch (err) {
+      setSaves((prev) => prev.map((s) => (s.id === id ? before : s)));
       showToast({ message: errorMessage(err), error: true });
     }
   }
@@ -326,6 +316,23 @@ export default function ScribbleApp({ user }: { user: User }) {
     } catch (err) {
       setSaves((prev) => prev.map((s) => (s.id === id ? before : s)));
       showToast({ message: errorMessage(err), error: true });
+    }
+  }
+
+  async function keepAll() {
+    const targets = saves.filter((s) => s.inbox && s.remoteId);
+    if (targets.length === 0) return;
+    const ids = new Set(targets.map((t) => t.id));
+
+    setSaves((prev) => prev.map((s) => (ids.has(s.id) ? { ...s, inbox: false } : s)));
+    const results = await Promise.allSettled(targets.map((t) => updateNote(t.remoteId!, { inbox: false })));
+    const failed = new Set(targets.filter((_, i) => results[i].status === "rejected").map((t) => t.id));
+
+    if (failed.size) {
+      setSaves((prev) => prev.map((s) => (failed.has(s.id) ? { ...s, inbox: true } : s)));
+      showToast({ message: `Couldn't move ${failed.size} of ${targets.length} items`, error: true });
+    } else {
+      showToast({ message: `Kept ${targets.length} items` });
     }
   }
 
@@ -358,54 +365,27 @@ export default function ScribbleApp({ user }: { user: User }) {
         open={composing}
         onOpenChange={setComposing}
         onSave={addSaves}
-        tagSuggestions={tags.custom}
+        tagSuggestions={customTags}
         enabled={active === 0}
       />
 
       <section className="mt-9 px-5">
         <h2 className="font-script text-[46px] leading-none">Your Lib</h2>
-        <div className="mt-3">
-          <TagFilter tags={tags.all} value={activeFilter} onChange={setFilter} />
-        </div>
-
-        {loading ? (
-          <ul className="mt-4 grid auto-rows-[128px] grid-flow-dense grid-cols-2 gap-3" aria-busy>
-            {SKELETON.map((size, i) => (
-              <li key={i} className={`${SPAN[size]} animate-pulse rounded-[24px] bg-white/[0.05]`} />
-            ))}
-          </ul>
-        ) : loadError && saves.length === 0 ? (
-          <div className="mt-4 rounded-[28px] border border-white/[0.07] bg-[var(--surface)] px-6 py-12 text-center">
-            <p className="text-[15px] text-[var(--muted)]">{loadError}</p>
-            <button
-              onClick={() => {
-                setLoading(true);
-                load();
-              }}
-              className="mt-4 rounded-full bg-[var(--text)] px-5 py-2 text-[15px] font-semibold text-[var(--bg)] active:scale-95"
-            >
-              Try again
-            </button>
-          </div>
-        ) : (
-          <>
-            <ul className="mt-4 grid auto-rows-[128px] grid-flow-dense grid-cols-2 gap-3">
-              <AnimatePresence initial={false}>
-                {tiles.map(({ save, size }) => (
-                  <SaveRow key={save.id} save={save} size={size} onOpen={setOpenId} />
-                ))}
-              </AnimatePresence>
-            </ul>
-
-            {visible.length === 0 && (
-              <div className="mt-4 rounded-[28px] border border-white/[0.07] bg-[var(--surface)] px-6 py-14 text-center text-[15px] leading-6 text-[var(--muted)]">
-                Nothing here yet.
-                <br />
-                Paste a link, drop a file, or scribble something.
-              </div>
-            )}
-          </>
-        )}
+        <Feed
+          items={library}
+          resetKey={feedReset}
+          loading={loading}
+          loadError={loadError}
+          onRetry={retry}
+          onOpen={setOpenId}
+          empty={
+            <div className="rounded-[28px] border border-white/[0.07] bg-[var(--surface)] px-6 py-14 text-center text-[15px] leading-6 text-[var(--muted)]">
+              Nothing here yet.
+              <br />
+              Paste a link, drop a file, or scribble something.
+            </div>
+          }
+        />
       </section>
     </div>
   );
@@ -441,11 +421,14 @@ export default function ScribbleApp({ user }: { user: User }) {
               <InboxPage
                 items={inboxItems}
                 loading={loading}
+                loadError={loadError}
+                resetKey={feedReset}
                 initial={initial}
+                onRetry={retry}
                 onAccount={openAccount}
                 onOpen={setOpenId}
                 onKeep={keepSave}
-                onDiscard={(id) => deleteSave(id, "Discarded")}
+                onKeepAll={keepAll}
                 onHelp={() => setSetupOpen(true)}
               />
             ),
@@ -459,10 +442,12 @@ export default function ScribbleApp({ user }: { user: User }) {
           <DetailSheet
             key="detail"
             save={openSave}
-            tagSuggestions={tags.custom}
+            tagSuggestions={customTags}
             onClose={() => setOpenId(null)}
             onEdit={editSave}
             onDelete={deleteSave}
+            onPin={togglePin}
+            onKeep={keepSave}
           />
         )}
       </AnimatePresence>

@@ -9,8 +9,8 @@ export type Save = {
   tags: string[];
   note?: string;
   content?: string; // full text, or the normalized URL for links
-  preview?: string; // blob URL while local, signed URL once loaded from the server
-  file?: File;
+  preview?: string; // blob URL while local, signed or remote URL once loaded from the server
+  file?: File; // keep it so it can be uploaded
   remoteId?: string; // the notes.id once the server has it
   pending?: boolean; // saving in the background
   createdAt?: string; // ISO timestamp
@@ -18,6 +18,7 @@ export type Save = {
   mime?: string;
   inbox?: boolean; // arrived by sharing and is waiting in the Inbox
   description?: string; // page description for links
+  pinned?: boolean;
 };
 
 export type NewSave = Omit<Save, "id" | "ago" | "tags" | "remoteId" | "pending">;
@@ -32,15 +33,53 @@ export const KIND_TAG: Record<SaveKind, string> = {
   note: "Notes",
   scribble: "Scribbles",
 };
-export const SYSTEM_TAGS: string[] = Object.values(KIND_TAG);
 
-export const SEED: Save[] = [
-  { id: "1", kind: "link", title: "How Linear builds product", meta: "linear.app", ago: "2m", tags: ["Links", "Design"] },
-  { id: "2", kind: "social", title: "Thread on designing calm interfaces", meta: "x.com", ago: "1h", tags: ["Social", "Design", "Read later"] },
-  { id: "3", kind: "file", title: "Q4-roadmap.pdf", meta: "PDF · 2.4 MB", ago: "3h", tags: ["Files", "Work"], note: "Check the launch dates" },
-  { id: "4", kind: "note", title: "Ship the share sheet before the weekend", meta: "Note", ago: "Yesterday", tags: ["Notes", "Ideas"] },
-  { id: "5", kind: "social", title: "Reel: 5-minute desk setup", meta: "instagram.com", ago: "2d", tags: ["Social", "Inspo"] },
+export const PINNED_TAG = "Pinned";
+
+// where a link came from, worked out from its host
+const SOURCES: [RegExp, string][] = [
+  [/(^|\.)instagram\.com$/, "Instagram"],
+  [/(^|\.)(youtube\.com|youtu\.be)$/, "YouTube"],
+  [/(^|\.)(x\.com|twitter\.com)$/, "X"],
+  [/(^|\.)reddit\.com$/, "Reddit"],
+  [/(^|\.)linkedin\.com$/, "LinkedIn"],
+  [/(^|\.)tiktok\.com$/, "TikTok"],
+  [/(^|\.)threads\.(net|com)$/, "Threads"],
+  [/(^|\.)(facebook\.com|fb\.com|fb\.watch)$/, "Facebook"],
+  [/(^|\.)pinterest\.[a-z.]+$/, "Pinterest"],
+  [/(^|\.)spotify\.com$/, "Spotify"],
+  [/(^|\.)github\.com$/, "GitHub"],
 ];
+
+export const SOURCE_TAGS: string[] = [...new Set(SOURCES.map(([, name]) => name)), "Web"];
+
+// tags that are worked out automatically (never stored, never counted as yours)
+export const SYSTEM_TAGS: string[] = [PINNED_TAG, ...Object.values(KIND_TAG), ...SOURCE_TAGS];
+
+export function sourceTag(host: string): string {
+  const h = host.toLowerCase().replace(/^www\./, "");
+  for (const [re, name] of SOURCES) if (re.test(h)) return name;
+  return "Web";
+}
+
+// every tag a save carries on its own, before you add any
+export function autoTags(s: { kind: SaveKind; meta: string; pinned?: boolean }): string[] {
+  const tags = [KIND_TAG[s.kind]];
+  if (s.kind === "link" || s.kind === "social") tags.push(sourceTag(s.meta));
+  if (s.pinned) tags.push(PINNED_TAG);
+  return tags;
+}
+
+// the filter chips for a set of saves: automatic ones first, then yours by popularity
+export function deriveTags(items: Save[]) {
+  const counts = new Map<string, number>();
+  for (const s of items) for (const t of s.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+  const system = SYSTEM_TAGS.filter((t) => counts.has(t));
+  const custom = [...counts.keys()]
+    .filter((t) => !SYSTEM_TAGS.includes(t))
+    .sort((a, b) => counts.get(b)! - counts.get(a)! || a.localeCompare(b));
+  return { all: [ALL, ...system, ...custom], custom };
+}
 
 export function cleanTag(raw: string, existing: string[]): string | null {
   const t = raw.trim().replace(/^#+/, "").replace(/\s+/g, " ").slice(0, 24);
