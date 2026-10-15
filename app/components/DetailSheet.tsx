@@ -12,6 +12,7 @@ import {
   Pencil,
   Pin,
   PinOff,
+  Share2,
   StickyNote,
   Trash2,
 } from "lucide-react";
@@ -44,7 +45,9 @@ type Props = {
   onDelete: (id: string) => void;
   onPin: (id: string) => void;
   onKeep: (id: string) => void;
+  onShare: (id: string) => void;
 };
+
 
 function formatDate(iso?: string) {
   if (!iso) return null;
@@ -52,7 +55,7 @@ function formatDate(iso?: string) {
   return Number.isNaN(d.getTime()) ? null : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-export function DetailSheet({ save, tagSuggestions, onClose, onEdit, onDelete, onPin, onKeep }: Props) {
+export function DetailSheet({ save, tagSuggestions, onClose, onEdit, onDelete, onPin, onKeep, onShare }: Props) {
   const [mode, setMode] = useState<"view" | "edit" | "confirm">("view");
   const [text, setText] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -260,7 +263,7 @@ export function DetailSheet({ save, tagSuggestions, onClose, onEdit, onDelete, o
         {/* actions */}
         {busy ? (
           <p className="py-2 text-center text-[15px] text-[var(--muted)]">Saving…</p>
-        ) : mode === "view" ? (
+                ) : mode === "view" ? (
           <div className="space-y-3">
             {save.inbox && (
               <Action
@@ -278,6 +281,11 @@ export function DetailSheet({ save, tagSuggestions, onClose, onEdit, onDelete, o
                 {save.pinned ? <PinOff size={17} strokeWidth={1.9} /> : <Pin size={17} strokeWidth={1.9} />}
                 {save.pinned ? "Unpin" : "Pin"}
               </Action>
+              <Action onClick={() => onShare(save.id)}>
+                <Share2 size={17} strokeWidth={1.9} /> Share
+              </Action>
+            </div>
+            <div className="flex gap-3">
               <Action onClick={startEdit}>
                 <Pencil size={17} strokeWidth={1.9} /> Edit
               </Action>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
+import { GoogleButton } from "../components/GoogleButton";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -38,6 +39,13 @@ export default function LoginPage() {
   return (
     <main className="mx-auto max-w-md p-8">
       <h1 className="mb-6 text-2xl font-bold">Sign in to Scribble</h1>
+
+      <GoogleButton />
+<div className="my-4 flex items-center gap-3 text-[13px] text-[var(--muted)]">
+  <span className="h-px flex-1 bg-white/10" />
+  or
+  <span className="h-px flex-1 bg-white/10" />
+</div>
 
       <form onSubmit={handleLogin} className="space-y-4">
         <label className="block">

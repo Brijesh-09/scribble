@@ -119,7 +119,8 @@ export async function DELETE(_request: Request, { params }: Ctx) {
       .delete()
       .eq("id", note.id)
       .eq("user_id", user.id);
-
+        // links to this item stop working, so remove them too
+    await supabase.from("shares").delete().eq("note_id", String(note.id)).eq("user_id", user.id);
     if (deleteError) {
       console.error("Delete capture failed:", deleteError.message);
       return Response.json({ error: "Could not delete capture" }, { status: 500 });
@@ -130,7 +131,7 @@ export async function DELETE(_request: Request, { params }: Ctx) {
       const { error: removeError } = await supabase.storage.from("scribble-uploads").remove([note.storage_path]);
       if (removeError) console.error("File cleanup failed:", removeError.message);
     }
-
+    
     return Response.json({ success: true });
   } catch (error) {
     console.error("DELETE /api/notes/[id] failed:", error);

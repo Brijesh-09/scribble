@@ -18,10 +18,13 @@ import { ScribblePad } from "@/app/components/Scribblepad";
 import { TabBar } from "@/app/components/TabBar";
 import { Pager } from "@/app/components/Pager";
 import { InboxPage } from "@/app/components/InboxPage";
+import { SharePage } from "@/app/components/SharePage";
 import { DetailSheet, type Edits } from "@/app/components/DetailSheet";
 import { AccountSheet } from "@/app/components/AccountSheet";
 import { ShareSetupSheet } from "@/app/components/ShareSetupSheet";
-import { autoTags, deriveTags, PINNED_TAG, uid, type NewSave, type Save } from "@/libs/saves";
+import { ShareNewSheet, type ShareOption } from "@/app/components/ShareNewSheet";
+import { ShareLinkSheet } from "@/app/components/ShareLinkSheet";
+import { ALL, autoTags, deriveTags, PINNED_TAG, uid, type NewSave, type Save } from "@/libs/saves";
 import {
   ApiError,
   createNote,
@@ -32,6 +35,7 @@ import {
   storedTags,
   updateNote,
 } from "@/libs/notes";
+import { copyLink, createShare, deleteShare, fetchShares, shareUrl, type Share } from "@/libs/shares";
 
 type Toast = { key: string; message: string; ids?: string[]; error?: boolean };
 type User = { email: string; createdAt: string };
@@ -42,27 +46,21 @@ const withPin = (s: Save, pinned: boolean): Save => ({
   tags: pinned ? Array.from(new Set([...s.tags, PINNED_TAG])) : s.tags.filter((t) => t !== PINNED_TAG),
 });
 
-function SharePage({ initial, onAccount }: { initial?: string; onAccount: () => void }) {
-  return (
-    <div className="mx-auto min-h-full w-full max-w-[430px] pb-44">
-      <Header initial={initial} onAccount={onAccount} />
-      <section className="mt-24 px-8 text-center">
-        <h2 className="font-script text-[48px] leading-none">Share</h2>
-        <p className="mt-3 text-[15px] leading-6 text-[var(--muted)]">Send a collection to someone with a single link.</p>
-      </section>
-    </div>
-  );
-}
-
 export default function ScribbleApp({ user }: { user: User }) {
   const [saves, setSaves] = useState<Save[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [shares, setShares] = useState<Share[]>([]);
+  const [sharesLoading, setSharesLoading] = useState(true);
+  const [sharesError, setSharesError] = useState<string | null>(null);
   const [feedReset, setFeedReset] = useState(0); // bump to clear search and filters in the feeds
   const [composing, setComposing] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
+  const [shareNewOpen, setShareNewOpen] = useState(false);
+  const [linkId, setLinkId] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
   const [padKey, setPadKey] = useState(0); // bump to give the scribble pad a clean sheet
 
@@ -131,14 +129,31 @@ export default function ScribbleApp({ user }: { user: User }) {
     }
   }, []);
 
+  const loadShares = useCallback(async () => {
+    try {
+      setShares(await fetchShares());
+      setSharesError(null);
+    } catch (err) {
+      if (!(err instanceof ApiError && err.status === 401)) setSharesError(errorMessage(err));
+    } finally {
+      setSharesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadShares();
+  }, [load, loadShares]);
 
   const retry = useCallback(() => {
     setLoading(true);
     load();
   }, [load]);
+
+  const retryShares = useCallback(() => {
+    setSharesLoading(true);
+    loadShares();
+  }, [loadShares]);
 
   // signed image URLs last an hour, so refresh after a long absence
   useEffect(() => {
@@ -153,10 +168,21 @@ export default function ScribbleApp({ user }: { user: User }) {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [load]);
 
-  /* ---------- derived: library vs inbox, tag suggestions, stats ---------- */
+  /* ---------- derived: library vs inbox, tag suggestions, share options, stats ---------- */
   const library = useMemo(() => saves.filter((s) => !s.inbox), [saves]);
   const inboxItems = useMemo(() => saves.filter((s) => s.inbox), [saves]);
   const customTags = useMemo(() => deriveTags(library).custom, [library]);
+
+  const shareOptions = useMemo<ShareOption[]>(() => {
+    const counts = new Map<string, number>();
+    for (const s of library) for (const t of s.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+    return [
+      { label: "Everything in your library", scope: "all", count: library.length },
+      ...deriveTags(library)
+        .all.filter((t) => t !== ALL)
+        .map((t): ShareOption => ({ label: t, scope: "tag", tag: t, count: counts.get(t) ?? 0 })),
+    ];
+  }, [library]);
 
   const stats = useMemo(
     () => ({
@@ -169,6 +195,7 @@ export default function ScribbleApp({ user }: { user: User }) {
   );
 
   const openSave = openId ? saves.find((s) => s.id === openId) : undefined;
+  const linkShare = linkId ? shares.find((s) => s.id === linkId) : undefined;
 
   /* ---------- toast timer ---------- */
   useEffect(() => {
@@ -230,8 +257,7 @@ export default function ScribbleApp({ user }: { user: User }) {
     setFeedReset((n) => n + 1); // clear search and filters so the new save is visible
     showToast({
       ids: created.map((c) => c.id),
-      message:
-        created.length > 1 ? `Saved ${created.length} items` : `Saved to ${extra[0] ?? created[0].tags[0]}`,
+      message: created.length > 1 ? `Saved ${created.length} items` : `Saved to ${extra[0] ?? created[0].tags[0]}`,
     });
     navigator.vibrate?.(10);
 
@@ -343,6 +369,7 @@ export default function ScribbleApp({ user }: { user: User }) {
 
     setOpenId(null);
     setSaves((prev) => prev.filter((s) => s.id !== id));
+    setShares((prev) => prev.filter((sh) => sh.note_id !== target.remoteId)); // their links die with them
     try {
       await deleteNote(target.remoteId);
       showToast({ message: label });
@@ -352,7 +379,61 @@ export default function ScribbleApp({ user }: { user: User }) {
         copy.splice(Math.min(index, copy.length), 0, target); // back where it was
         return copy;
       });
+      loadShares();
       showToast({ message: errorMessage(err), error: true });
+    }
+  }
+
+  /* ---------- share links ---------- */
+  async function makeShare(input: { scope: Share["scope"]; tag?: string; noteId?: string; title?: string }) {
+    setSharing(true);
+    try {
+      const share = await createShare(input);
+      setShares((prev) => (prev.some((s) => s.id === share.id) ? prev : [share, ...prev]));
+      setShareNewOpen(false);
+      setOpenId(null);
+      setLinkId(share.id); // opens the "Link ready" sheet, where Copy and Share get a fresh tap
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      showToast({ message: errorMessage(err), error: true });
+    } finally {
+      setSharing(false);
+    }
+  }
+
+  function shareItem(id: string) {
+    const save = saves.find((s) => s.id === id);
+    if (!save?.remoteId) {
+      showToast({ message: "Still saving. Try again in a moment.", error: true });
+      return;
+    }
+    makeShare({ scope: "item", noteId: save.remoteId, title: save.note ?? save.title });
+  }
+
+  async function stopSharing(id: string) {
+    const before = shares;
+    setShares((prev) => prev.filter((s) => s.id !== id));
+    setLinkId(null);
+    try {
+      await deleteShare(id);
+      showToast({ message: "Link stopped. It no longer works." });
+    } catch (err) {
+      setShares(before);
+      showToast({ message: errorMessage(err), error: true });
+    }
+  }
+
+  async function copyShare(id: string) {
+    const share = shares.find((s) => s.id === id);
+    if (!share) return;
+    try {
+      await copyLink(shareUrl(share.token));
+      showToast({ message: "Link copied" });
+    } catch {
+      showToast({ message: "Couldn't copy. Open the link and copy it from there.", error: true });
     }
   }
 
@@ -433,7 +514,22 @@ export default function ScribbleApp({ user }: { user: User }) {
               />
             ),
           },
-          { scroll: true, node: <SharePage initial={initial} onAccount={openAccount} /> },
+          {
+            scroll: true,
+            node: (
+              <SharePage
+                shares={shares}
+                loading={sharesLoading}
+                error={sharesError}
+                initial={initial}
+                onAccount={openAccount}
+                onNew={() => setShareNewOpen(true)}
+                onOpen={setLinkId}
+                onCopy={copyShare}
+                onRetry={retryShares}
+              />
+            ),
+          },
         ]}
       />
 
@@ -448,7 +544,26 @@ export default function ScribbleApp({ user }: { user: User }) {
             onDelete={deleteSave}
             onPin={togglePin}
             onKeep={keepSave}
+            onShare={shareItem}
           />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {shareNewOpen && (
+          <ShareNewSheet
+            key="share-new"
+            options={shareOptions}
+            busy={sharing}
+            onPick={(o) => makeShare({ scope: o.scope, tag: o.tag, title: o.scope === "all" ? "Everything" : o.tag })}
+            onClose={() => setShareNewOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {linkShare && (
+          <ShareLinkSheet key="share-link" share={linkShare} onStop={stopSharing} onClose={() => setLinkId(null)} />
         )}
       </AnimatePresence>
 
